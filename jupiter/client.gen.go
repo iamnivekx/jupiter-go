@@ -78,9 +78,16 @@ type QuoteResponse struct {
 	PlatformFee    *PlatformFee    `json:"platformFee,omitempty"`
 	PriceImpactPct string          `json:"priceImpactPct"`
 	RoutePlan      []RoutePlanStep `json:"routePlan"`
-	SlippageBps    int32           `json:"slippageBps"`
-	SwapMode       SwapMode        `json:"swapMode"`
-	TimeTaken      *float32        `json:"timeTaken,omitempty"`
+
+	// SimplerRouteUsed - Whether the simpler route was used
+	SimplerRouteUsed *bool    `json:"simplerRouteUsed,omitempty"`
+	SlippageBps      int32    `json:"slippageBps"`
+	SwapMode         SwapMode `json:"swapMode"`
+
+	// SwapUsdValue - The USD value of the swap
+	// - Calculated based on the input and output amounts and the current price of the input and output mints
+	SwapUsdValue *string  `json:"swapUsdValue,omitempty"`
+	TimeTaken    *float32 `json:"timeTaken,omitempty"`
 }
 
 // RoutePlanStep defines model for RoutePlanStep.
@@ -104,18 +111,53 @@ type SwapInfo struct {
 // SwapInstructionsResponse defines model for SwapInstructionsResponse.
 type SwapInstructionsResponse struct {
 	// AddressLookupTableAddresses - The lookup table addresses if you are using versioned transaction.
-	AddressLookupTableAddresses []string     `json:"addressLookupTableAddresses"`
-	CleanupInstruction          *Instruction `json:"cleanupInstruction,omitempty"`
+	AddressLookupTableAddresses []string `json:"addressLookupTableAddresses"`
+
+	// AddressesByLookupTableAddress - Addresses organized by lookup table address.
+	AddressesByLookupTableAddress *map[string]interface{} `json:"addressesByLookupTableAddress"`
+
+	// BlockhashWithMetadata - Blockhash information with metadata.
+	BlockhashWithMetadata *struct {
+		Blockhash []uint8 `json:"blockhash"`
+		FetchedAt struct {
+			NanosSinceEpoch uint32 `json:"nanos_since_epoch"`
+			SecsSinceEpoch  uint64 `json:"secs_since_epoch"`
+		} `json:"fetchedAt"`
+		LastValidBlockHeight uint64 `json:"lastValidBlockHeight"`
+	} `json:"blockhashWithMetadata"`
+	CleanupInstruction *Instruction `json:"cleanupInstruction,omitempty"`
 
 	// ComputeBudgetInstructions - To setup the compute budget for the transaction.
 	ComputeBudgetInstructions []Instruction `json:"computeBudgetInstructions"`
+	ComputeUnitLimit          *uint64       `json:"computeUnitLimit,omitempty"`
+
+	// DynamicSlippageReport - Dynamic slippage report if enabled.
+	DynamicSlippageReport *map[string]interface{} `json:"dynamicSlippageReport"`
 
 	// OtherInstructions - If you set `{\"prioritizationFeeLamports\": {\"jitoTipLamports\": 5000}}`, you will see a custom tip instruction to Jito here.
-	OtherInstructions *[]Instruction `json:"otherInstructions,omitempty"`
+	OtherInstructions         *[]Instruction `json:"otherInstructions,omitempty"`
+	PrioritizationFeeLamports *uint64        `json:"prioritizationFeeLamports,omitempty"`
+
+	// PrioritizationType - Information about the prioritization fee type and amounts.
+	PrioritizationType *struct {
+		ComputeBudget *struct {
+			EstimatedMicroLamports uint64 `json:"estimatedMicroLamports"`
+			MicroLamports          uint64 `json:"microLamports"`
+		} `json:"computeBudget,omitempty"`
+	} `json:"prioritizationType,omitempty"`
 
 	// SetupInstructions - To setup required token accounts for the users.
 	SetupInstructions []Instruction `json:"setupInstructions"`
-	SwapInstruction   Instruction   `json:"swapInstruction"`
+
+	// SimulationError - Error information if simulation failed.
+	SimulationError *struct {
+		Error     string `json:"error"`
+		ErrorCode string `json:"errorCode"`
+	} `json:"simulationError"`
+
+	// SimulationSlot - The slot number when the simulation was performed.
+	SimulationSlot  *uint64     `json:"simulationSlot,omitempty"`
+	SwapInstruction Instruction `json:"swapInstruction"`
 }
 
 // SwapMode defines model for SwapMode.
@@ -129,12 +171,12 @@ type SwapRequest struct {
 
 	// BlockhashSlotsToExpiry - Pass in the number of slots we want the transaction to be valid for
 	// - Example: If you pass in 10 slots, the transaction will be valid for ~400ms * 10 = approximately 4 seconds before it expires
-	BlockhashSlotsToExpiry *int `json:"blockhashSlotsToExpiry,omitempty"`
+	BlockhashSlotsToExpiry *uint8 `json:"blockhashSlotsToExpiry,omitempty"`
 
 	// ComputeUnitPriceMicroLamports - To use an exact compute unit price to calculate priority fee
 	// - `computeUnitLimit (1400000) * computeUnitPriceMicroLamports`
 	// - We recommend using `prioritizationFeeLamports` and `dynamicComputeUnitLimit` instead of passing in your own compute unit price
-	ComputeUnitPriceMicroLamports *int `json:"computeUnitPriceMicroLamports,omitempty"`
+	ComputeUnitPriceMicroLamports *uint64 `json:"computeUnitPriceMicroLamports,omitempty"`
 
 	// DestinationTokenAccount - Public key of a token account that will be used to receive the token out of the swap
 	// - If not provided, the signer's token account will be used
@@ -157,6 +199,10 @@ type SwapRequest struct {
 	// - See [Add Fees](/docs/swap-api/add-fees-to-swap) guide for more details
 	FeeAccount *string `json:"feeAccount,omitempty"`
 
+	// Payer - Allow a custom payer to pay for the transaction fees and rent of token accounts
+	// - Note that users can close their ATAs elsewhere and have you reopen them again, your fees should account for this
+	Payer *string `json:"payer,omitempty"`
+
 	// PrioritizationFeeLamports - To specify a level or amount of additional fees to prioritize the transaction
 	// - It can be used for EITHER priority fee OR Jito tip (not both at the same time)
 	// - If you want to include both, you will need to use `/swap-instructions` to add both at the same time
@@ -165,10 +211,10 @@ type SwapRequest struct {
 		// - Refer to Jito docs on how to estimate the tip amount based on percentiles
 		// - It has to be used together with a connection to a Jito RPC
 		// - [See their docs](https://docs.jito.wtf/)
-		JitoTipLamports              *int `json:"jitoTipLamports,omitempty"`
+		JitoTipLamports              *uint64 `json:"jitoTipLamports,omitempty"`
 		PriorityLevelWithMaxLamports *struct {
 			// MaxLamports - Maximum lamports to cap the priority fee estimation, to prevent overpaying
-			MaxLamports   *int                                                                           `json:"maxLamports,omitempty"`
+			MaxLamports   *uint64                                                                        `json:"maxLamports,omitempty"`
 			PriorityLevel *SwapRequestPrioritizationFeeLamportsPriorityLevelWithMaxLamportsPriorityLevel `json:"priorityLevel,omitempty"`
 		} `json:"priorityLevelWithMaxLamports,omitempty"`
 	} `json:"prioritizationFeeLamports,omitempty"`
@@ -187,8 +233,10 @@ type SwapRequest struct {
 	// - This enables the usage of shared program accounts, this is essential as complex routing will require multiple intermediate token accounts which the user might not have
 	// - If true, you do not need to handle the creation of intermediate token accounts for the user
 	// - Do note, shared accounts route will fail on some new AMMs (low liquidity token)
-	UseSharedAccounts *bool  `json:"useSharedAccounts,omitempty"`
-	UserPublicKey     string `json:"userPublicKey"`
+	UseSharedAccounts *bool `json:"useSharedAccounts,omitempty"`
+
+	// UserPublicKey The user public key.
+	UserPublicKey string `json:"userPublicKey"`
 
 	// WrapAndUnwrapSol - To automatically wrap/unwrap SOL in the transaction
 	// - If false, it will use wSOL token account
@@ -201,13 +249,13 @@ type SwapRequestPrioritizationFeeLamportsPriorityLevelWithMaxLamportsPriorityLev
 
 // SwapResponse defines model for SwapResponse.
 type SwapResponse struct {
-	LastValidBlockHeight      int    `json:"lastValidBlockHeight"`
-	PrioritizationFeeLamports *int   `json:"prioritizationFeeLamports,omitempty"`
-	SwapTransaction           string `json:"swapTransaction"`
+	LastValidBlockHeight      uint64  `json:"lastValidBlockHeight"`
+	PrioritizationFeeLamports *uint64 `json:"prioritizationFeeLamports,omitempty"`
+	SwapTransaction           string  `json:"swapTransaction"`
 }
 
 // AmountParameter defines model for AmountParameter.
-type AmountParameter = int64
+type AmountParameter = uint64
 
 // AsLegacyTransactionParameter defines model for AsLegacyTransactionParameter.
 type AsLegacyTransactionParameter = bool
@@ -234,13 +282,13 @@ type OnlyDirectRoutesParameter = bool
 type OutputMintParameter = string
 
 // PlatformFeeBpsParameter defines model for PlatformFeeBpsParameter.
-type PlatformFeeBpsParameter = int
+type PlatformFeeBpsParameter = uint8
 
 // RestrictIntermediateTokensParameter defines model for RestrictIntermediateTokensParameter.
 type RestrictIntermediateTokensParameter = bool
 
 // SlippageParameter defines model for SlippageParameter.
-type SlippageParameter = int
+type SlippageParameter = uint16
 
 // SwapModeParameter defines model for SwapModeParameter.
 type SwapModeParameter string
